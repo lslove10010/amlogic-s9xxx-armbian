@@ -1,53 +1,76 @@
-name: Build Armbian for s905x3 (Debian)
+name: Rebuild Armbian
 
 on:
   workflow_dispatch:
+    inputs:
+      board:
+        description: 'Board type (e.g., s905x3)'
+        required: true
+        default: 's905x3'
+      kernel:
+        description: 'Kernel version (e.g., 6.6.y)'
+        required: true
+        default: '6.6.y'
 
 jobs:
-  build-armbian:
+  rebuild:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check Docker
-        run: docker --version
-
-      - name: Build Armbian image in Docker
+      - name: Download Armbian base image
+        id: down
         run: |
-          docker run --rm -v ${{ github.workspace }}:/armbian \
-            ophub/armbian:latest \
-            bash /armbian/compile.sh \
-              BOARD=s905x3 \
-              BRANCH=current \
-              RELEASE=bookworm \
-              KERNEL=6.6.y \
-              BUILD_TYPE=server \
-              COMPRESS=xz
+          # 下载最新的 Armbian trunk 镜像（可自定义站点）
+          armbian_site="https://dl.armbian.com/_tool/"
+          armbian_name="Armbian.*-trunk.*.img.xz"
+          armbian_file=$(curl -s "${armbian_site}" | grep -oE "${armbian_name}" | head -n 1)
+          if [[ -n "${armbian_file}" ]]; then
+            armbian_url="${armbian_site}${armbian_file}"
+          else
+            echo "Invalid download path: [ ${armbian_site} ]"
+            exit 1
+          fi
+          echo "ARMBIAN_URL=${armbian_url}" >> ${GITHUB_ENV}
+          # 生成构建标签
+          build_tag="Armbian_rebuild_$(date +%Y.%m.%d)"
+          echo "build_tag=${build_tag}" >> $GITHUB_OUTPUT
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Rebuild Armbian for Amlogic
+        uses: ophub/amlogic-s9xxx-armbian@main
         with:
-          name: armbian-image
-          path: output/images/*.img.xz
+          build_target: armbian
+          armbian_path: ${{ env.ARMBIAN_URL }}
+          armbian_board: ${{ inputs.board }}  # 使用输入的 board 参数，如 s905x3
+          armbian_kernel: ${{ inputs.kernel }}  # 使用输入的 kernel 参数，如 6.6.y
+          armbian_size: 5000  # 镜像大小 (MiB)，可调整
+          filesystem: ext4  # 文件系统，可选 ext4/btrfs
+          compress: xz  # 压缩格式
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+      - name: Upload Armbian image to Release
+        uses: ncipollo/release-action@v1
+        if: always()
         with:
-          tag_name: armbian-s905x3-${{ github.run_number }}
-          name: Armbian s905x3 Build ${{ github.run_number }}
+          tag: ${{ steps.down.outputs.build_tag }}
+          artifacts: build/output/images/*.img.xz  # 上传生成的 img.xz
+          allowUpdates: true
+          removeArtifacts: false
+          replacesArtifacts: true
+          token: ${{ secrets.GITHUB_TOKEN }}
           body: |
-            ✅ Armbian build for s905x3
-            - Kernel: 6.6.y
-            - OS: Debian Bookworm
-            - Type: Server (no desktop)
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            ### Armbian Image Information
+            - **Board**: ${{ inputs.board }}
+            - **Kernel**: ${{ inputs.kernel }}
+            - Default username: root
+            - Default password: 1234
+            - Install command: armbian-install
+            - Update command: armbian-update
+            ### Verification
+            - SHA256: (在日志中查看)
 
-      - name: Upload image to Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: output/images/*.img.xz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+env:
+  PACKAGED_OUTPUTPATH: build/output/images/
+  PACKAGED_STATUS: success  # 假设成功，可根据实际调整
