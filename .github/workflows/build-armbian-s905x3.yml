@@ -1,80 +1,87 @@
-name: Rebuild Armbian
+name: Build Armbian for X96 Max+ (S905X3)
 
 on:
   workflow_dispatch:
     inputs:
-      board:
-        description: 'Board type (e.g., s905x3)'
+      armbian_board:
+        description: 'Board'
         required: true
-        default: 's905x3'
-      kernel:
-        description: 'Kernel version (e.g., 6.6.y)'
+        default: 's905x3-x96max+'
+      armbian_kernel:
+        description: 'Kernel'
         required: true
         default: '6.6.y'
 
 jobs:
-  rebuild:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download Armbian base image
-        id: down
+      - name: Free disk space
         run: |
-          # 下载 Armbian trunk 镜像：使用 Odroid-N2（S905X3 兼容），可替换站点
-          armbian_site="https://dl.armbian.com/odroidn2/"
-          armbian_name="Armbian_.*-trunk.*_current_.*.img.xz"  # 调整为 trunk current 模式
-          armbian_file=$(curl -s "${armbian_site}" | grep -oE "${armbian_name}" | head -n 1)
-          if [[ -n "${armbian_file}" ]]; then
-            armbian_url="${armbian_site}${armbian_file}"
-            # 下载文件到本地路径
-            wget -O build/output/images/base.img.xz "${armbian_url}"
-            echo "ARMBIAN_PATH=build/output/images/base.img.xz" >> ${GITHUB_ENV}
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
+
+      - name: Download official Armbian trunk (Odroid-N2 base for S905X3)
+        id: download
+        run: |
+          mkdir -p build/output/images
+          cd build/output/images
+          SITE="https://dl.armbian.com/odroidn2/"
+          FILE=$(curl -s "$SITE" | grep -oE 'Armbian_.*-trunk.*_current_.*\.img\.xz' | head -n 1)
+          if [[ -z "$FILE" ]]; then
+            SITE="https://armbian.tnahosting.net/dl/odroidn2/"
+            FILE=$(curl -s "$SITE" | grep -oE 'Armbian_.*-trunk.*_current_.*\.img\.xz' | head -n 1)
+          fi
+          if [[ -n "$FILE" ]]; then
+            echo "正在下载: $SITE/$FILE"
+            wget "$SITE/$FILE"
+            echo "BASE_IMAGE=$FILE" >> $GITHUB_ENV
+            echo "download_success=true" >> $GITHUB_OUTPUT
           else
-            echo "Invalid download path: [ ${armbian_site} ]. Check site for trunk files."
+            echo "错误：未找到 Armbian trunk 镜像"
             exit 1
           fi
 
-      - name: Generate build tag
-        id: tag
-        if: success()  # 仅在下载成功后执行
-        run: |
-          build_tag="Armbian_rebuild_$(date +%Y.%m.%d)"
-          echo "build_tag=${build_tag}" >> $GITHUB_OUTPUT
-
-      - name: Rebuild Armbian for Amlogic
-        if: success()
+      - name: Build Armbian
+        if: steps.download.outputs.download_success == 'true'
         uses: ophub/amlogic-s9xxx-armbian@main
         with:
           build_target: armbian
-          armbian_path: ${{ env.ARMBIAN_PATH }}  # 使用下载的文件路径
-          armbian_board: ${{ inputs.board }}  # 如 s905x3
-          armbian_kernel: ${{ inputs.kernel }}  # 如 6.6.y
-          armbian_size: 5000  # 镜像大小 (MiB)
-          armbian_fstype: ext4  # 文件系统
-          auto_kernel: true  # 自动用最新内核版本
+          armbian_path: build/output/images/${{ env.BASE_IMAGE }}
+          armbian_board: ${{ inputs.armbian_board }}
+          armbian_kernel: ${{ inputs.armbian_kernel }}
+          armbian_size: 5000
+          armbian_fstype: ext4
+          compress: xz
+          auto_kernel: true
 
-      - name: Upload Armbian image to Release
-        if: success()  # 仅成功时上传
+      - name: Upload to Artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Armbian-X96MaxPlus-${{ inputs.armbian_kernel }}
+          path: build/output/images/*.img.xz
+          retention-days: 30
+
+      # 新增：上传到 GitHub Releases
+      - name: Create GitHub Release
+        if: success()
         uses: ncipollo/release-action@v1
         with:
-          tag: ${{ steps.tag.outputs.build_tag }}
-          artifacts: build/output/images/*.img.xz
-          allowUpdates: true
-          removeArtifacts: false
-          replacesArtifacts: true
-          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: x96max-plus-${{ inputs.armbian_kernel }}-${{ github.run_number }}
+          name: X96 Max+ Armbian ${{ inputs.armbian_kernel }}
           body: |
-            ### Armbian Image Information
-            - **Board**: ${{ inputs.board }}
-            - **Kernel**: ${{ inputs.kernel }}
-            - Default username: root
-            - Default password: 1234
-            - Install command: armbian-install
-
-env:
-  PACKAGED_OUTPUTPATH: build/output/images/
-  PACKAGED_STATUS: success
+            ### 设备信息
+            - **板型**: `s905x3-x96max+`
+            - **内核**: ${{ inputs.armbian_kernel }}
+            - **基础镜像**: ${{ env.BASE_IMAGE }}
+            
+            ### 登录信息
+            - 用户名: `root`
+            - 密码: `1234`（首次登录强制修改）
+            
+            ### 安装命令
+            ```bash
+            armbian-install  # 安装到 eMMC
