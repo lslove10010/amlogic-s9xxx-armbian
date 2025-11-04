@@ -24,38 +24,45 @@ jobs:
       - name: Download Armbian base image
         id: down
         run: |
-          # 下载最新的 Armbian trunk 镜像（可自定义站点）
-          armbian_site="https://dl.armbian.com/_tool/"
-          armbian_name="Armbian.*-trunk.*.img.xz"
+          # 下载 Armbian trunk 镜像：使用 Odroid-N2（S905X3 兼容），可替换站点
+          armbian_site="https://dl.armbian.com/odroidn2/"
+          armbian_name="Armbian_.*-trunk.*_current_.*.img.xz"  # 调整为 trunk current 模式
           armbian_file=$(curl -s "${armbian_site}" | grep -oE "${armbian_name}" | head -n 1)
           if [[ -n "${armbian_file}" ]]; then
             armbian_url="${armbian_site}${armbian_file}"
+            # 下载文件到本地路径
+            wget -O build/output/images/base.img.xz "${armbian_url}"
+            echo "ARMBIAN_PATH=build/output/images/base.img.xz" >> ${GITHUB_ENV}
           else
-            echo "Invalid download path: [ ${armbian_site} ]"
+            echo "Invalid download path: [ ${armbian_site} ]. Check site for trunk files."
             exit 1
           fi
-          echo "ARMBIAN_URL=${armbian_url}" >> ${GITHUB_ENV}
-          # 生成构建标签
+
+      - name: Generate build tag
+        id: tag
+        if: success()  # 仅在下载成功后执行
+        run: |
           build_tag="Armbian_rebuild_$(date +%Y.%m.%d)"
           echo "build_tag=${build_tag}" >> $GITHUB_OUTPUT
 
       - name: Rebuild Armbian for Amlogic
+        if: success()
         uses: ophub/amlogic-s9xxx-armbian@main
         with:
           build_target: armbian
-          armbian_path: ${{ env.ARMBIAN_URL }}
-          armbian_board: ${{ inputs.board }}  # 使用输入的 board 参数，如 s905x3
-          armbian_kernel: ${{ inputs.kernel }}  # 使用输入的 kernel 参数，如 6.6.y
-          armbian_size: 5000  # 镜像大小 (MiB)，可调整
-          filesystem: ext4  # 文件系统，可选 ext4/btrfs
-          compress: xz  # 压缩格式
+          armbian_path: ${{ env.ARMBIAN_PATH }}  # 使用下载的文件路径
+          armbian_board: ${{ inputs.board }}  # 如 s905x3
+          armbian_kernel: ${{ inputs.kernel }}  # 如 6.6.y
+          armbian_size: 5000  # 镜像大小 (MiB)
+          armbian_fstype: ext4  # 文件系统
+          auto_kernel: true  # 自动用最新内核版本
 
       - name: Upload Armbian image to Release
+        if: success()  # 仅成功时上传
         uses: ncipollo/release-action@v1
-        if: always()
         with:
-          tag: ${{ steps.down.outputs.build_tag }}
-          artifacts: build/output/images/*.img.xz  # 上传生成的 img.xz
+          tag: ${{ steps.tag.outputs.build_tag }}
+          artifacts: build/output/images/*.img.xz
           allowUpdates: true
           removeArtifacts: false
           replacesArtifacts: true
@@ -67,10 +74,7 @@ jobs:
             - Default username: root
             - Default password: 1234
             - Install command: armbian-install
-            - Update command: armbian-update
-            ### Verification
-            - SHA256: (在日志中查看)
 
 env:
   PACKAGED_OUTPUTPATH: build/output/images/
-  PACKAGED_STATUS: success  # 假设成功，可根据实际调整
+  PACKAGED_STATUS: success
