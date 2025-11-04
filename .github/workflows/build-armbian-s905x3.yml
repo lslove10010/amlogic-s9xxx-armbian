@@ -11,25 +11,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Cache Armbian build files
-        uses: actions/cache@v4
-        with:
-          path: |
-            cache
-            output/debs
-          key: armbian-${{ runner.os }}-${{ github.run_id }}
-          restore-keys: |
-            armbian-${{ runner.os }}-
-
-      - name: Build Armbian image
+      - name: Set up Docker
         run: |
-          sudo bash compile-armbian.sh \
-            -b s905x3 \
-            -k 6.6.y \
-            -r bookworm \
-            -t server \
-            -d no \
-            -c xz
+          sudo apt-get update
+          sudo apt-get install -y docker.io
+
+      - name: Build Armbian image in Docker
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/armbian \
+            ophub/armbian:latest \
+            bash /armbian/compile.sh \
+              BOARD=s905x3 \
+              BRANCH=current \
+              RELEASE=bookworm \
+              KERNEL=6.6.y \
+              BUILD_TYPE=server \
+              COMPRESS=xz
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
