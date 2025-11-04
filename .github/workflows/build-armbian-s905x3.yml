@@ -1,0 +1,48 @@
+name: Build Armbian for s905x3 (Debian)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-armbian:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Build Armbian image
+        run: |
+          bash build-armbian.sh \
+            -b s905x3 \
+            -k 6.6.y \
+            -r bookworm \
+            -t server \
+            -d no \
+            -c xz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: armbian-image
+          path: output/images/*.img.xz
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: armbian-s905x3-${{ github.run_number }}
+          name: Armbian s905x3 Build ${{ github.run_number }}
+          body: |
+            ✅ Armbian build for s905x3
+            - Kernel: 6.6.y
+            - OS: Debian Bookworm
+            - Type: Server (no desktop)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload image to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: output/images/*.img.xz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
