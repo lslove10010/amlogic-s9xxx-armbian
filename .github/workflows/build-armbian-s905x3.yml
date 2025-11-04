@@ -15,15 +15,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            build-armbian/cache
-            build-armbian/output/debs
+            cache
+            output/debs
           key: armbian-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             armbian-${{ runner.os }}-
 
       - name: Build Armbian image
         run: |
-          bash build-armbian.sh \
+          sudo bash compile-armbian.sh \
             -b s905x3 \
             -k 6.6.y \
             -r bookworm \
